@@ -1,0 +1,120 @@
+.page-shell {
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 24px;
+  display: grid;
+  gap: 16px;
+}
+
+.dashboard-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.card {
+  background: #ffffff;
+  border: 1px solid #d6dce5;
+  border-radius: 12px;
+  padding: 16px;
+}
+
+.card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.form-grid {
+  display: grid;
+  gap: 10px;
+}
+
+.inline-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 10px;
+}
+
+.stat-card {
+  background: #ffffff;
+  border: 1px solid #d6dce5;
+  border-radius: 12px;
+  padding: 12px;
+  display: grid;
+  gap: 4px;
+}
+
+.stat-card strong {
+  font-size: 22px;
+}
+
+.ticket-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  border-top: 1px solid #e6ebf1;
+  padding: 12px 0;
+}
+
+.ticket-row:first-of-type {
+  border-top: 0;
+}
+
+.ticket-actions {
+  display: grid;
+  gap: 8px;
+  justify-items: end;
+  min-width: 180px;
+}
+
+.danger-btn {
+  border-color: #991b1b;
+  background: #b91c1c;
+}
+
+.status {
+  border-radius: 999px;
+  padding: 4px 10px;
+  color: #fff;
+  font-size: 12px;
+  text-transform: uppercase;
+}
+
+.status-open {
+  background: #d97706;
+}
+
+.status-in_progress {
+  background: #2563eb;
+}
+
+.status-closed {
+  background: #15803d;
+}
+
+@media (max-width: 700px) {
+  .ticket-row {
+    flex-direction: column;
+  }
+
+  .ticket-actions {
+    width: 100%;
+    justify-items: stretch;
+    min-width: 0;
+  }
+
+  .inline-grid {
+    grid-template-columns: 1fr;
+  }
+}
