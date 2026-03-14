@@ -4,6 +4,7 @@ const mongoose = require("mongoose");
 const User = require("../models/User");
 const protect = require("../middleware/authMiddleware");
 const authorizeRoles = require("../middleware/roleMiddleware");
+const { DEPARTMENTS } = require("../lib/ticketConfig");
 
 const router = express.Router();
 const TOKEN_COOKIE_NAME = "token";
@@ -57,15 +58,27 @@ router.post("/google-login", async (req, res) => {
         role: "user",
       });
     } else {
-      user.name = payload.name;
-      user.email = payload.email;
-      user.googleId = payload.sub;
-      await user.save();
+      // Avoid blocking login on legacy profile validation rules.
+      await User.updateOne(
+        { _id: user._id },
+        {
+          $set: {
+            name: payload.name,
+            email: payload.email,
+            googleId: payload.sub,
+          },
+        }
+      );
+      user = await User.findById(user._id);
     }
 
-    const token = jwt.sign({ id: user._id, role: user.role }, process.env.JWT_SECRET, {
+    const token = jwt.sign(
+      { id: user._id, role: user.role, department: user.department },
+      process.env.JWT_SECRET,
+      {
       expiresIn: "7d",
-    });
+      }
+    );
 
     res.cookie(TOKEN_COOKIE_NAME, token, {
       httpOnly: true,
@@ -105,7 +118,7 @@ router.get("/me", protect, async (req, res) => {
 
 router.get("/users", protect, authorizeRoles("admin"), async (_req, res) => {
   try {
-    const users = await User.find({}).select("name email role");
+    const users = await User.find({}).select("name email role department");
     res.json(users);
   } catch (err) {
     console.error(err);
@@ -114,10 +127,11 @@ router.get("/users", protect, authorizeRoles("admin"), async (_req, res) => {
 });
 
 router.patch("/users/:id/role", protect, authorizeRoles("admin"), async (req, res) => {
-  const { role } = req.body;
-
   try {
-    if (!["user", "support", "admin"].includes(role)) {
+    const payload = req.body && typeof req.body === "object" ? req.body : {};
+    const role = typeof payload.role === "string" ? payload.role.trim().toLowerCase() : "";
+
+    if (!["user", "customer", "support", "admin"].includes(role)) {
       return res.status(400).json({ message: "Invalid role" });
     }
 
@@ -134,13 +148,65 @@ router.patch("/users/:id/role", protect, authorizeRoles("admin"), async (req, re
       return res.status(404).json({ message: "User not found" });
     }
 
-    target.role = role;
+    const normalizedRole = role === "customer" ? "user" : role;
+    const departmentValue = payload.department;
+    const normalizedDepartment =
+      typeof departmentValue === "string"
+        ? departmentValue.trim()
+        : departmentValue == null
+          ? undefined
+          : "";
+
+    if (departmentValue != null && typeof departmentValue !== "string") {
+      return res.status(400).json({ message: "Invalid department" });
+    }
+
+    if (
+      normalizedDepartment &&
+      !DEPARTMENTS.includes(normalizedDepartment)
+    ) {
+      return res.status(400).json({ message: "Invalid department" });
+    }
+
+    target.role = normalizedRole;
+
+    if (normalizedRole === "admin" && !normalizedDepartment) {
+      return res.status(400).json({ message: "Valid department is required for admin" });
+    }
+
+    target.department =
+      normalizedRole === "admin" || normalizedRole === "support"
+        ? normalizedDepartment || undefined
+        : undefined;
     await target.save();
 
-    res.json({ _id: target._id, name: target.name, email: target.email, role: target.role });
+    res.json({
+      _id: target._id,
+      name: target.name,
+      email: target.email,
+      role: target.role,
+      department: target.department,
+    });
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ message: "Server error" });
+    console.error("[PATCH /api/auth/users/:id/role] failed", {
+      userId: req.params?.id,
+      actorId: req.user?.id,
+      payload: req.body,
+      name: err?.name,
+      message: err?.message,
+      code: err?.code,
+      stack: err?.stack,
+    });
+
+    if (err.name === "ValidationError") {
+      const message = Object.values(err.errors)[0]?.message || "Validation error";
+      return res.status(400).json({ message });
+    }
+
+    res.status(500).json({
+      message: "Server error",
+      error: process.env.NODE_ENV !== "production" ? err?.message : undefined,
+    });
   }
 });
 

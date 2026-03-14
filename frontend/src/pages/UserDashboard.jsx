@@ -1,26 +1,74 @@
 import React, { useEffect, useState } from "react";
 import api from "../lib/api";
 
-const statusOptions = ["open", "in_progress", "closed"];
-const categoryOptions = ["general", "billing", "technical", "account", "other"];
-const priorityOptions = ["low", "medium", "high"];
+const fallbackMeta = {
+  departments: [
+    "Order Management",
+    "Delivery & Logistics",
+    "Returns & Refunds",
+    "Payments & Billing",
+    "Technical Support",
+    "Account Support",
+  ],
+  subcategories: {
+    "Order Management": ["Change Address", "Cancel Order", "Update Items", "Order Not Found"],
+    "Delivery & Logistics": ["Not Delivered", "Late Delivery", "Wrong Address", "Tracking Issue"],
+    "Returns & Refunds": ["Return Request", "Refund Delay", "Wrong Item Returned", "Damaged Item"],
+    "Payments & Billing": ["Payment Failure", "Double Charged", "Invoice Needed", "Payment Pending"],
+    "Technical Support": ["App Error", "Checkout Error", "Login Issue", "Website Performance"],
+    "Account Support": ["Password Reset", "Profile Update", "Account Locked", "Email Change"],
+  },
+  statuses: [
+    "Open",
+    "Assigned",
+    "Under Review",
+    "Waiting for Customer",
+    "Resolved",
+    "Closed",
+    "Escalated",
+  ],
+};
+
+const resolutionStatuses = new Set(["Resolved", "Closed"]);
+
+const toStatusClass = (status) => status.toLowerCase().replace(/\s+/g, "-");
+
+const getSlaLabel = (ticket) => {
+  if (!ticket?.slaDeadline) return "SLA: N/A";
+  if (resolutionStatuses.has(ticket.status)) return "SLA met";
+
+  const remainingMs = new Date(ticket.slaDeadline).getTime() - Date.now();
+  if (remainingMs <= 0) return "SLA breached";
+
+  const hours = Math.floor(remainingMs / (1000 * 60 * 60));
+  const minutes = Math.floor((remainingMs % (1000 * 60 * 60)) / (1000 * 60));
+  return `SLA: ${hours}h ${minutes}m left`;
+};
 
 const UserDashboard = ({ user, onLogout }) => {
   const [tickets, setTickets] = useState([]);
-  const [stats, setStats] = useState({ total: 0, open: 0, in_progress: 0, closed: 0 });
+  const [meta, setMeta] = useState(fallbackMeta);
+  const [stats, setStats] = useState({ total: 0, Open: 0, Resolved: 0, Escalated: 0 });
   const [statusFilter, setStatusFilter] = useState("all");
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
-  const [category, setCategory] = useState("general");
-  const [priority, setPriority] = useState("medium");
+  const [department, setDepartment] = useState(fallbackMeta.departments[0]);
+  const [subcategory, setSubcategory] = useState(fallbackMeta.subcategories[fallbackMeta.departments[0]][0]);
+  const [feedbackDrafts, setFeedbackDrafts] = useState({});
   const [loading, setLoading] = useState(false);
+  const [, setRefreshTick] = useState(0);
 
   const fetchData = async () => {
-    const [ticketsRes, statsRes] = await Promise.all([
+    const [ticketsRes, statsRes, metaRes] = await Promise.all([
       api.get("/api/tickets"),
       api.get("/api/tickets/stats"),
+      api.get("/api/tickets/meta"),
     ]);
-    return { tickets: ticketsRes.data, stats: statsRes.data };
+    return {
+      tickets: ticketsRes.data,
+      stats: statsRes.data,
+      meta: metaRes.data,
+    };
   };
 
   const loadData = async () => {
@@ -28,6 +76,12 @@ const UserDashboard = ({ user, onLogout }) => {
       const data = await fetchData();
       setTickets(data.tickets);
       setStats(data.stats);
+      setMeta(data.meta);
+
+      if (!data.meta.subcategories[department]?.includes(subcategory)) {
+        const firstSubcategory = data.meta.subcategories[department]?.[0] || "";
+        setSubcategory(firstSubcategory);
+      }
     } catch (err) {
       console.error(err);
       alert("Failed to load dashboard data");
@@ -42,6 +96,7 @@ const UserDashboard = ({ user, onLogout }) => {
         if (cancelled) return;
         setTickets(data.tickets);
         setStats(data.stats);
+        setMeta(data.meta);
       })
       .catch((err) => {
         console.error(err);
@@ -53,15 +108,30 @@ const UserDashboard = ({ user, onLogout }) => {
     };
   }, []);
 
+  useEffect(() => {
+    const timer = setInterval(() => setRefreshTick((prev) => prev + 1), 30000);
+    return () => clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    if (!meta.subcategories[department]?.includes(subcategory)) {
+      setSubcategory(meta.subcategories[department]?.[0] || "");
+    }
+  }, [department, meta, subcategory]);
+
   const createTicket = async (e) => {
     e.preventDefault();
     setLoading(true);
     try {
-      await api.post("/api/tickets", { title, description, category, priority });
+      await api.post("/api/tickets", {
+        title,
+        description,
+        department,
+        subcategory,
+      });
       setTitle("");
       setDescription("");
-      setCategory("general");
-      setPriority("medium");
+      setSubcategory(meta.subcategories[department]?.[0] || "");
       await loadData();
     } catch (err) {
       console.error(err);
@@ -81,14 +151,30 @@ const UserDashboard = ({ user, onLogout }) => {
     }
   };
 
+  const submitFeedback = async (ticketId) => {
+    const draft = feedbackDrafts[ticketId] || {};
+    try {
+      await api.post(`/api/tickets/${ticketId}/feedback`, {
+        rating: Number(draft.rating),
+        comment: draft.comment || "",
+      });
+      await loadData();
+    } catch (err) {
+      console.error(err);
+      alert(err.response?.data?.message || "Failed to submit feedback");
+    }
+  };
+
   const filteredTickets =
     statusFilter === "all" ? tickets : tickets.filter((ticket) => ticket.status === statusFilter);
+
+  const statusOptions = meta.statuses || fallbackMeta.statuses;
 
   return (
     <div className="page-shell">
       <div className="dashboard-head">
         <div>
-          <h1>User Dashboard</h1>
+          <h1>Customer Dashboard</h1>
           <p>{user?.name}</p>
         </div>
         <button onClick={onLogout}>Logout</button>
@@ -96,9 +182,9 @@ const UserDashboard = ({ user, onLogout }) => {
 
       <div className="stats-grid">
         <div className="stat-card"><small>Total</small><strong>{stats.total}</strong></div>
-        <div className="stat-card"><small>Open</small><strong>{stats.open}</strong></div>
-        <div className="stat-card"><small>In Progress</small><strong>{stats.in_progress}</strong></div>
-        <div className="stat-card"><small>Closed</small><strong>{stats.closed}</strong></div>
+        <div className="stat-card"><small>Open</small><strong>{stats.Open || 0}</strong></div>
+        <div className="stat-card"><small>Resolved</small><strong>{stats.Resolved || 0}</strong></div>
+        <div className="stat-card"><small>Escalated</small><strong>{stats.Escalated || 0}</strong></div>
       </div>
 
       <div className="card">
@@ -118,15 +204,15 @@ const UserDashboard = ({ user, onLogout }) => {
             required
           />
           <div className="inline-grid">
-            <select value={category} onChange={(e) => setCategory(e.target.value)}>
-              {categoryOptions.map((item) => (
+            <select value={department} onChange={(e) => setDepartment(e.target.value)} required>
+              {meta.departments.map((item) => (
                 <option key={item} value={item}>
                   {item}
                 </option>
               ))}
             </select>
-            <select value={priority} onChange={(e) => setPriority(e.target.value)}>
-              {priorityOptions.map((item) => (
+            <select value={subcategory} onChange={(e) => setSubcategory(e.target.value)} required>
+              {(meta.subcategories[department] || []).map((item) => (
                 <option key={item} value={item}>
                   {item}
                 </option>
@@ -158,14 +244,68 @@ const UserDashboard = ({ user, onLogout }) => {
               <strong>{ticket.title}</strong>
               <p>{ticket.description}</p>
               <small>
-                Category: {ticket.category} | Priority: {ticket.priority} | Assigned:{" "}
-                {ticket.assignedTo?.name || "Not assigned"}
+                Dept: {ticket.department} | Subcategory: {ticket.subcategory} | Priority: {ticket.priority}
               </small>
-              {ticket.resolutionNote && <p><small>Note: {ticket.resolutionNote}</small></p>}
+              <p><small>Assigned: {ticket.assignedTo?.name || "Not assigned"}</small></p>
+              <p><small>{getSlaLabel(ticket)}</small></p>
+              <div className="status-progress">
+                {(meta.statuses || []).map((status) => (
+                  <span
+                    key={`${ticket._id}-${status}`}
+                    className={`progress-node ${
+                      meta.statuses.indexOf(ticket.status) >= meta.statuses.indexOf(status) ? "active" : ""
+                    }`}
+                  >
+                    {status}
+                  </span>
+                ))}
+              </div>
+              {ticket.resolutionNote && <p><small>Resolution Note: {ticket.resolutionNote}</small></p>}
+              {resolutionStatuses.has(ticket.status) && (
+                <div className="feedback-box">
+                  {ticket.feedback?.submittedAt ? (
+                    <small>
+                      Feedback submitted: {ticket.feedback.rating}/5 {ticket.feedback.comment ? `- ${ticket.feedback.comment}` : ""}
+                    </small>
+                  ) : (
+                    <>
+                      <div className="inline-grid">
+                        <select
+                          value={feedbackDrafts[ticket._id]?.rating || ""}
+                          onChange={(e) =>
+                            setFeedbackDrafts((prev) => ({
+                              ...prev,
+                              [ticket._id]: { ...(prev[ticket._id] || {}), rating: e.target.value },
+                            }))
+                          }
+                        >
+                          <option value="" disabled>Rating</option>
+                          {[1, 2, 3, 4, 5].map((rating) => (
+                            <option key={rating} value={rating}>{rating}</option>
+                          ))}
+                        </select>
+                        <input
+                          value={feedbackDrafts[ticket._id]?.comment || ""}
+                          onChange={(e) =>
+                            setFeedbackDrafts((prev) => ({
+                              ...prev,
+                              [ticket._id]: { ...(prev[ticket._id] || {}), comment: e.target.value },
+                            }))
+                          }
+                          placeholder="Optional feedback"
+                        />
+                      </div>
+                      <button onClick={() => submitFeedback(ticket._id)}>
+                        Submit Feedback
+                      </button>
+                    </>
+                  )}
+                </div>
+              )}
             </div>
             <div className="ticket-actions">
-              <span className={`status status-${ticket.status}`}>{ticket.status}</span>
-              {ticket.status === "open" && (
+              <span className={`status status-${toStatusClass(ticket.status)}`}>{ticket.status}</span>
+              {ticket.status === "Open" && (
                 <button onClick={() => deleteTicket(ticket._id)} className="danger-btn">
                   Delete
                 </button>

@@ -1,16 +1,71 @@
-# React + Vite
+# Frontend - Customer Support Portal
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+React frontend for the role-based Customer Support Portal.
 
-Currently, two official plugins are available:
+## Features
+- Google Sign-In login
+- Role-based routing and protected pages
+- Dashboards for:
+- `user`: create/manage own tickets
+- `support`: update assigned tickets
+- `admin`: assign tickets and manage user roles
+- Live ticket stats and filtering
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+## Tech Stack
+- React 19
+- Vite
+- React Router
+- Axios
+- `@react-oauth/google`
 
-## React Compiler
+## Environment
+Create `.env` in this folder from `.env.example`:
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+```env
+VITE_API_URL=http://localhost:5000
+VITE_GOOGLE_CLIENT_ID=replace_with_google_oauth_client_id
+```
 
-## Expanding the ESLint configuration
+## Run Locally
+```bash
+npm install
+npm run dev
+```
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+Default app URL: `http://localhost:5173`
+
+## Build
+```bash
+npm run build
+npm run preview
+```
+
+## Main Pages
+- `src/pages/Login.jsx`
+- `src/pages/UserDashboard.jsx`
+- `src/pages/SupportDashboard.jsx`
+- `src/pages/AdminDashboard.jsx`
+- `src/pages/ProtectedRoute.jsx`
+
+## Activity Flow and Database Usage
+### Frontend Activity Flow
+- User authenticates with Google on the login page.
+- App checks the active session using `GET /api/auth/me`.
+- User is redirected by role:
+- `admin` to `/admin`
+- `support` to `/support`
+- `user` to `/user`
+- Dashboards call ticket and auth APIs based on role permissions.
+
+### How Frontend Uses Database Data
+- Frontend does not access MongoDB directly.
+- It consumes backend APIs that read/write MongoDB collections.
+- `users` data is used for role-based routing and admin user management.
+- `tickets` data is used for list views, stats cards, filters, assignment, and updates.
+
+### API-Driven DB Actions from UI
+- Login creates/fetches users via `POST /api/auth/google-login`.
+- User ticket creation: `POST /api/tickets`.
+- Ticket updates (status, priority, notes, assignment): `PATCH /api/tickets/:id`.
+- Ticket removal: `DELETE /api/tickets/:id`.
+- Stats cards: `GET /api/tickets/stats`.

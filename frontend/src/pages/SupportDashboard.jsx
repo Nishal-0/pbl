@@ -1,18 +1,24 @@
 import React, { useEffect, useState } from "react";
 import api from "../lib/api";
 
-const statusOptions = ["open", "in_progress", "closed"];
+const statusOptions = ["Open", "Assigned", "Under Review", "Waiting for Customer", "Resolved", "Closed", "Escalated"];
 const priorityOptions = ["low", "medium", "high"];
+const toStatusClass = (status) => status.toLowerCase().replace(/\s+/g, "-");
 
 const SupportDashboard = ({ user, onLogout }) => {
   const [tickets, setTickets] = useState([]);
-  const [stats, setStats] = useState({ total: 0, open: 0, in_progress: 0, closed: 0 });
+  const [stats, setStats] = useState({ total: 0, Open: 0, Assigned: 0, Resolved: 0, Escalated: 0 });
   const [statusFilter, setStatusFilter] = useState("all");
+  const [priorityFilter, setPriorityFilter] = useState("all");
   const [noteDrafts, setNoteDrafts] = useState({});
 
   const fetchData = async () => {
+    const params = {};
+    if (statusFilter !== "all") params.status = statusFilter;
+    if (priorityFilter !== "all") params.priority = priorityFilter;
+
     const [ticketsRes, statsRes] = await Promise.all([
-      api.get("/api/tickets/all"),
+      api.get("/api/tickets/all", { params }),
       api.get("/api/tickets/stats"),
     ]);
     return { tickets: ticketsRes.data, stats: statsRes.data };
@@ -35,7 +41,7 @@ const SupportDashboard = ({ user, onLogout }) => {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [statusFilter, priorityFilter]);
 
   const loadTickets = async () => {
     try {
@@ -69,6 +75,11 @@ const SupportDashboard = ({ user, onLogout }) => {
   };
 
   const saveNote = async (ticketId) => {
+    const ticket = tickets.find((item) => item._id === ticketId);
+    if (ticket?.status === "Closed") {
+      return;
+    }
+
     try {
       await api.patch(`/api/tickets/${ticketId}`, { resolutionNote: noteDrafts[ticketId] || "" });
       await loadTickets();
@@ -77,9 +88,6 @@ const SupportDashboard = ({ user, onLogout }) => {
       alert(err.response?.data?.message || "Failed to save note");
     }
   };
-
-  const filteredTickets =
-    statusFilter === "all" ? tickets : tickets.filter((ticket) => ticket.status === statusFilter);
 
   return (
     <div className="page-shell">
@@ -93,32 +101,54 @@ const SupportDashboard = ({ user, onLogout }) => {
 
       <div className="stats-grid">
         <div className="stat-card"><small>Total</small><strong>{stats.total}</strong></div>
-        <div className="stat-card"><small>Open</small><strong>{stats.open}</strong></div>
-        <div className="stat-card"><small>In Progress</small><strong>{stats.in_progress}</strong></div>
-        <div className="stat-card"><small>Closed</small><strong>{stats.closed}</strong></div>
+        <div className="stat-card"><small>Open</small><strong>{stats.Open || 0}</strong></div>
+        <div className="stat-card"><small>Assigned</small><strong>{stats.Assigned || 0}</strong></div>
+        <div className="stat-card"><small>Resolved</small><strong>{stats.Resolved || 0}</strong></div>
+        <div className="stat-card"><small>Escalated</small><strong>{stats.Escalated || 0}</strong></div>
       </div>
 
       <div className="card">
         <div className="card-head">
-          <h2>Assigned Tickets</h2>
-          <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
-            <option value="all">all</option>
-            {statusOptions.map((item) => (
-              <option key={item} value={item}>
-                {item}
-              </option>
-            ))}
-          </select>
+          <h2>Department Tickets</h2>
+          <div className="inline-grid">
+            <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+              <option value="all">all statuses</option>
+              {statusOptions.map((item) => (
+                <option key={item} value={item}>
+                  {item}
+                </option>
+              ))}
+            </select>
+            <select value={priorityFilter} onChange={(e) => setPriorityFilter(e.target.value)}>
+              <option value="all">all priorities</option>
+              {priorityOptions.map((item) => (
+                <option key={item} value={item}>
+                  {item}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
-        {filteredTickets.length === 0 && <p>No assigned tickets.</p>}
-        {filteredTickets.map((ticket) => (
+        {tickets.length === 0 && <p>No department tickets.</p>}
+        {tickets.map((ticket) => (
           <div key={ticket._id} className="ticket-row">
             <div>
               <strong>{ticket.title}</strong>
               <p>{ticket.description}</p>
               <small>
-                Created by: {ticket.user?.name || "Unknown user"} | Category: {ticket.category}
+                Created by: {ticket.user?.name || "Unknown user"} | Department: {ticket.department} | Subcategory: {ticket.subcategory}
               </small>
+              {ticket.feedback?.rating && (
+                <p>
+                  <small>
+                    Customer Feedback: {ticket.feedback.rating}/5
+                    {ticket.feedback.comment ? ` - ${ticket.feedback.comment}` : ""}
+                    {ticket.feedback.submittedAt
+                      ? ` (${new Date(ticket.feedback.submittedAt).toLocaleString()})`
+                      : ""}
+                  </small>
+                </p>
+              )}
               <textarea
                 rows={2}
                 value={noteDrafts[ticket._id] ?? ticket.resolutionNote ?? ""}
@@ -126,17 +156,18 @@ const SupportDashboard = ({ user, onLogout }) => {
                   setNoteDrafts((prev) => ({ ...prev, [ticket._id]: e.target.value }))
                 }
                 placeholder="Add a resolution note"
+                disabled={ticket.status === "Closed"}
               />
             </div>
             <div className="ticket-actions">
-              <span className={`status status-${ticket.status}`}>{ticket.status}</span>
+              <span className={`status status-${toStatusClass(ticket.status)}`}>{ticket.status}</span>
               <select
                 value={ticket.status}
                 onChange={(e) => updateStatus(ticket._id, e.target.value)}
               >
-                <option value="open">open</option>
-                <option value="in_progress">in_progress</option>
-                <option value="closed">closed</option>
+                {statusOptions.map((status) => (
+                  <option key={status} value={status}>{status}</option>
+                ))}
               </select>
               <select
                 value={ticket.priority || "medium"}
@@ -148,7 +179,12 @@ const SupportDashboard = ({ user, onLogout }) => {
                   </option>
                 ))}
               </select>
-              <button onClick={() => saveNote(ticket._id)}>Save Note</button>
+              <button
+                onClick={() => saveNote(ticket._id)}
+                disabled={ticket.status === "Closed"}
+              >
+                Save Note
+              </button>
             </div>
           </div>
         ))}

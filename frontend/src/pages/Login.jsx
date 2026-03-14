@@ -7,6 +7,7 @@ const roleHomePath = {
   admin: "/admin",
   support: "/support",
   user: "/user",
+  customer: "/user",
 };
 
 const Login = ({ setUser }) => {
@@ -25,20 +26,37 @@ const Login = ({ setUser }) => {
       navigate(redirectPath, { replace: true });
     } catch (err) {
       console.error(err);
-      alert("Login failed. Please try again.");
+      alert(err.response?.data?.message || "Login failed. Please try again.");
     }
   };
 
   return (
-    <div className="page-shell">
-      <div className="card">
-        <h1>Customer Support Portal</h1>
-        <p>Sign in with Google to access your workspace.</p>
-        <GoogleLogin
-          onSuccess={handleLogin}
-          onError={() => console.log("Login Failed")}
-        />
-      </div>
+    <div className="login-shell">
+      <section className="login-hero">
+        <span className="login-badge">Customer Support Portal</span>
+        <h1>One workspace for support, escalations, and customer outcomes.</h1>
+        <p>
+          Manage tickets with clear ownership, SLA visibility, and feedback tracking in a
+          single dashboard built for daily operations.
+        </p>
+        <div className="login-points">
+          <span>Department-based access</span>
+          <span>Live ticket workflow updates</span>
+          <span>Built-in customer feedback loop</span>
+        </div>
+      </section>
+
+      <section className="card login-auth">
+        <h2>Sign in</h2>
+        <p>Continue with your Google account to access the portal securely.</p>
+        <div className="login-google-wrap">
+          <GoogleLogin
+            onSuccess={handleLogin}
+            onError={() => console.log("Login Failed")}
+          />
+        </div>
+        <small>By continuing, you agree to your organization's access policy.</small>
+      </section>
     </div>
   );
 };

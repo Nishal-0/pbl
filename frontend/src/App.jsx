@@ -12,6 +12,7 @@ const roleHomePath = {
   admin: "/admin",
   support: "/support",
   user: "/user",
+  customer: "/user",
 };
 
 function App() {
@@ -84,7 +85,7 @@ function App() {
         <Route
           path="/user"
           element={
-            <ProtectedRoute user={user} allowedRoles={["user"]}>
+            <ProtectedRoute user={user} allowedRoles={["user", "customer"]}>
               <UserDashboard user={user} onLogout={logout} />
             </ProtectedRoute>
           }
