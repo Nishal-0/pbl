@@ -19,6 +19,16 @@ const unresolvedStatuses = STATUS.filter((item) => !RESOLUTION_STATUSES.has(item
 
 const toObjectId = (id) => new mongoose.Types.ObjectId(id);
 
+const ticketPopulate = [
+  { path: "user", select: "name email role department" },
+  { path: "assignedTo", select: "name email role department" },
+];
+
+const messagePopulate = {
+  path: "messages.sender",
+  select: "name email role department",
+};
+
 const ensureEscalations = async (baseQuery = {}) => {
   const now = new Date();
 
@@ -56,6 +66,33 @@ const canAccessTicket = (req, ticket) => {
   }
 
   return false;
+};
+
+const canReplyToTicket = (req, ticket) => {
+  if (req.user.role === "customer") {
+    req.user.role = "user";
+  }
+
+  if (req.user.role === "user") {
+    return String(ticket.user) === req.user.id;
+  }
+
+  if (!["support", "admin"].includes(req.user.role)) {
+    return false;
+  }
+
+  return String(ticket.assignedTo || "") === req.user.id;
+};
+
+const sortMessages = (messages = []) =>
+  [...messages].sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+
+const getAdminScopedTicketQuery = (req) => {
+  if (req.user.role === "admin" && req.legacyAdminScope) {
+    return {};
+  }
+
+  return { department: req.departmentScope };
 };
 
 const getMyTickets = async (req, res) => {
@@ -155,6 +192,7 @@ const getTicketStats = async (req, res) => {
       Assigned: 0,
       "Under Review": 0,
       "Waiting for Customer": 0,
+      Reopened: 0,
       Resolved: 0,
       Closed: 0,
       Escalated: 0,
@@ -272,10 +310,7 @@ const createTicket = async (req, res) => {
       escalationStatus: false,
     });
 
-    const populated = await ticket.populate([
-      { path: "user", select: "name email role department" },
-      { path: "assignedTo", select: "name email role department" },
-    ]);
+    const populated = await ticket.populate(ticketPopulate);
 
     res.status(201).json(populated);
   } catch (err) {
@@ -438,11 +473,156 @@ const updateTicket = async (req, res) => {
       }
     }
 
-    const populated = await updated.populate([
-      { path: "user", select: "name email role department" },
-      { path: "assignedTo", select: "name email role department" },
-    ]);
+    const populated = await updated.populate(ticketPopulate);
     res.json(populated);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+const getDepartmentStats = async (req, res) => {
+  try {
+    const query = getAdminScopedTicketQuery(req);
+
+    await ensureEscalations(query);
+
+    const grouped = await Ticket.aggregate([
+      { $match: query },
+      {
+        $group: {
+          _id: { department: "$department", status: "$status" },
+          count: { $sum: 1 },
+        },
+      },
+      {
+        $sort: {
+          "_id.department": 1,
+        },
+      },
+    ]);
+
+    const visibleDepartments =
+      req.user.role === "admin" && req.legacyAdminScope
+        ? DEPARTMENTS
+        : [req.departmentScope].filter(Boolean);
+
+    // Seed every visible department with the full status list so the chart
+    // payload remains stable even when a status currently has zero tickets.
+    const stats = visibleDepartments.reduce((acc, department) => {
+      acc[department] = STATUS.reduce((statusAcc, status) => {
+        statusAcc[status] = 0;
+        return statusAcc;
+      }, {});
+      return acc;
+    }, {});
+
+    grouped.forEach((item) => {
+      const department = item._id?.department;
+      const status = item._id?.status;
+
+      if (!department || !status) {
+        return;
+      }
+
+      if (!stats[department]) {
+        stats[department] = STATUS.reduce((statusAcc, statusItem) => {
+          statusAcc[statusItem] = 0;
+          return statusAcc;
+        }, {});
+      }
+
+      if (stats[department][status] !== undefined) {
+        stats[department][status] = item.count;
+      }
+    });
+
+    res.json(stats);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+const getTicketMessages = async (req, res) => {
+  try {
+    if (req.user.role === "customer") {
+      req.user.role = "user";
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({ message: "Invalid ticket id" });
+    }
+
+    const ticket = await Ticket.findById(req.params.id).populate(messagePopulate);
+    if (!ticket) {
+      return res.status(404).json({ message: "Ticket not found" });
+    }
+
+    if (!canAccessTicket(req, ticket)) {
+      return res.status(403).json({ message: "Forbidden" });
+    }
+
+    res.json(sortMessages(ticket.messages));
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+const replyToTicket = async (req, res) => {
+  const content = String(req.body?.message || "").trim();
+
+  try {
+    if (req.user.role === "customer") {
+      req.user.role = "user";
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({ message: "Invalid ticket id" });
+    }
+
+    if (!content) {
+      return res.status(400).json({ message: "Message is required" });
+    }
+
+    const ticket = await Ticket.findById(req.params.id);
+    if (!ticket) {
+      return res.status(404).json({ message: "Ticket not found" });
+    }
+
+    if (!canReplyToTicket(req, ticket)) {
+      return res.status(403).json({ message: "Forbidden" });
+    }
+
+    ticket.messages.push({
+      sender: req.user.id,
+      senderRole: req.user.role,
+      message: content,
+    });
+
+    // Support/admin replies count as a response if the ticket was still awaiting first handling.
+    if (!ticket.firstResponseTime && ["support", "admin"].includes(req.user.role)) {
+      ticket.firstResponseTime = new Date();
+    }
+
+    // Customer replies on resolved work reopen the ticket without changing other workflow APIs.
+    if (req.user.role === "user" && ["Closed", "Resolved"].includes(ticket.status)) {
+      ticket.status = "Reopened";
+      ticket.resolvedAt = undefined;
+      ticket.closedAt = undefined;
+    }
+
+    await ticket.save();
+
+    const populated = await Ticket.findById(ticket._id)
+      .populate(ticketPopulate)
+      .populate(messagePopulate);
+
+    res.json({
+      ticket: populated,
+      messages: sortMessages(populated?.messages),
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: "Server error" });
@@ -551,9 +731,12 @@ module.exports = {
   createTicket,
   deleteTicket,
   getAllTickets,
+  getDepartmentStats,
+  getTicketMessages,
   getMyTickets,
   getTicketMeta,
   getTicketStats,
+  replyToTicket,
   submitFeedback,
   updateTicket,
 };

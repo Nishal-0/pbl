@@ -8,6 +8,38 @@ const orderRoutes = require("./routes/orders");
 const { notFound, errorHandler } = require("./middleware/errorMiddleware");
 
 const app = express();
+app.set("trust proxy", 1);
+
+const parseConfiguredOrigins = () => {
+  const configuredOrigins = [
+    process.env.CORS_ORIGIN,
+    ...(process.env.CORS_ORIGINS || "").split(","),
+    process.env.FRONTEND_URL,
+  ]
+    .filter(Boolean)
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+
+  return [...new Set(configuredOrigins)];
+};
+
+const allowedOrigins = parseConfiguredOrigins();
+
+const isAllowedOrigin = (origin) => {
+  if (!origin) {
+    return true;
+  }
+
+  if (allowedOrigins.includes(origin)) {
+    return true;
+  }
+
+  if (/^http:\/\/localhost:\d+$/i.test(origin) || /^http:\/\/127\.0\.0\.1:\d+$/i.test(origin)) {
+    return true;
+  }
+
+  return false;
+};
 
 const requiredEnvVars = ["MONGO_URI", "JWT_SECRET", "GOOGLE_CLIENT_ID"];
 for (const key of requiredEnvVars) {
@@ -29,14 +61,24 @@ connectDB();
 
 app.use(
   cors({
-    origin: process.env.CORS_ORIGIN || "http://localhost:5173",
+    origin(origin, callback) {
+      if (isAllowedOrigin(origin)) {
+        return callback(null, true);
+      }
+
+      return callback(new Error(`CORS blocked for origin: ${origin}`));
+    },
     credentials: true,
   })
 );
 app.use(express.json());
 
 app.get("/api/health", (_req, res) => {
-  res.json({ status: "ok" });
+  res.json({
+    status: "ok",
+    uptime: process.uptime(),
+    timestamp: new Date().toISOString(),
+  });
 });
 
 app.use("/api/auth", authRoutes);

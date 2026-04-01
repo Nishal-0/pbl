@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import api from "../lib/api";
+import TicketConversation from "../components/TicketConversation";
 
 const fallbackMeta = {
   departments: [
@@ -23,6 +24,7 @@ const fallbackMeta = {
     "Assigned",
     "Under Review",
     "Waiting for Customer",
+    "Reopened",
     "Resolved",
     "Closed",
     "Escalated",
@@ -55,6 +57,9 @@ const UserDashboard = ({ user, onLogout }) => {
   const [department, setDepartment] = useState(fallbackMeta.departments[0]);
   const [subcategory, setSubcategory] = useState(fallbackMeta.subcategories[fallbackMeta.departments[0]][0]);
   const [feedbackDrafts, setFeedbackDrafts] = useState({});
+  const [ticketMessages, setTicketMessages] = useState({});
+  const [messageLoading, setMessageLoading] = useState({});
+  const [openThreads, setOpenThreads] = useState({});
   const [loading, setLoading] = useState(false);
   const [, setRefreshTick] = useState(0);
 
@@ -165,6 +170,33 @@ const UserDashboard = ({ user, onLogout }) => {
     }
   };
 
+  const toggleThread = async (ticketId) => {
+    const nextOpen = !openThreads[ticketId];
+    setOpenThreads((prev) => ({ ...prev, [ticketId]: nextOpen }));
+
+    if (!nextOpen || ticketMessages[ticketId] !== undefined) {
+      return;
+    }
+
+    setMessageLoading((prev) => ({ ...prev, [ticketId]: true }));
+    try {
+      const response = await api.get(`/api/tickets/${ticketId}/messages`);
+      setTicketMessages((prev) => ({ ...prev, [ticketId]: response.data }));
+    } catch (err) {
+      console.error(err);
+      alert(err.response?.data?.message || "Failed to load messages");
+      setOpenThreads((prev) => ({ ...prev, [ticketId]: false }));
+    } finally {
+      setMessageLoading((prev) => ({ ...prev, [ticketId]: false }));
+    }
+  };
+
+  const updateTicketState = (updatedTicket) => {
+    setTickets((prev) =>
+      prev.map((ticket) => (ticket._id === updatedTicket._id ? updatedTicket : ticket))
+    );
+  };
+
   const filteredTickets =
     statusFilter === "all" ? tickets : tickets.filter((ticket) => ticket.status === statusFilter);
 
@@ -261,6 +293,19 @@ const UserDashboard = ({ user, onLogout }) => {
                 ))}
               </div>
               {ticket.resolutionNote && <p><small>Resolution Note: {ticket.resolutionNote}</small></p>}
+              <TicketConversation
+                ticket={ticket}
+                canReply
+                placeholder="Reply to support"
+                messages={ticketMessages[ticket._id]}
+                loading={messageLoading[ticket._id]}
+                isOpen={Boolean(openThreads[ticket._id])}
+                onToggle={toggleThread}
+                onMessagesLoaded={(ticketId, messages) =>
+                  setTicketMessages((prev) => ({ ...prev, [ticketId]: messages }))
+                }
+                onTicketUpdated={updateTicketState}
+              />
               {resolutionStatuses.has(ticket.status) && (
                 <div className="feedback-box">
                   {ticket.feedback?.submittedAt ? (

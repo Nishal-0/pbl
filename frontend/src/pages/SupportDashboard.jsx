@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from "react";
 import api from "../lib/api";
+import TicketConversation from "../components/TicketConversation";
 
-const statusOptions = ["Open", "Assigned", "Under Review", "Waiting for Customer", "Resolved", "Closed", "Escalated"];
+const statusOptions = ["Open", "Assigned", "Under Review", "Waiting for Customer", "Reopened", "Resolved", "Closed", "Escalated"];
 const priorityOptions = ["low", "medium", "high"];
 const toStatusClass = (status) => status.toLowerCase().replace(/\s+/g, "-");
 
@@ -11,6 +12,9 @@ const SupportDashboard = ({ user, onLogout }) => {
   const [statusFilter, setStatusFilter] = useState("all");
   const [priorityFilter, setPriorityFilter] = useState("all");
   const [noteDrafts, setNoteDrafts] = useState({});
+  const [ticketMessages, setTicketMessages] = useState({});
+  const [messageLoading, setMessageLoading] = useState({});
+  const [openThreads, setOpenThreads] = useState({});
 
   const fetchData = async () => {
     const params = {};
@@ -89,6 +93,33 @@ const SupportDashboard = ({ user, onLogout }) => {
     }
   };
 
+  const toggleThread = async (ticketId) => {
+    const nextOpen = !openThreads[ticketId];
+    setOpenThreads((prev) => ({ ...prev, [ticketId]: nextOpen }));
+
+    if (!nextOpen || ticketMessages[ticketId] !== undefined) {
+      return;
+    }
+
+    setMessageLoading((prev) => ({ ...prev, [ticketId]: true }));
+    try {
+      const response = await api.get(`/api/tickets/${ticketId}/messages`);
+      setTicketMessages((prev) => ({ ...prev, [ticketId]: response.data }));
+    } catch (err) {
+      console.error(err);
+      alert(err.response?.data?.message || "Failed to load messages");
+      setOpenThreads((prev) => ({ ...prev, [ticketId]: false }));
+    } finally {
+      setMessageLoading((prev) => ({ ...prev, [ticketId]: false }));
+    }
+  };
+
+  const updateTicketState = (updatedTicket) => {
+    setTickets((prev) =>
+      prev.map((ticket) => (ticket._id === updatedTicket._id ? updatedTicket : ticket))
+    );
+  };
+
   return (
     <div className="page-shell">
       <div className="dashboard-head">
@@ -157,6 +188,19 @@ const SupportDashboard = ({ user, onLogout }) => {
                 }
                 placeholder="Add a resolution note"
                 disabled={ticket.status === "Closed"}
+              />
+              <TicketConversation
+                ticket={ticket}
+                canReply={Boolean(ticket.assignedTo?._id === user?._id)}
+                placeholder="Reply to customer"
+                messages={ticketMessages[ticket._id]}
+                loading={messageLoading[ticket._id]}
+                isOpen={Boolean(openThreads[ticket._id])}
+                onToggle={toggleThread}
+                onMessagesLoaded={(ticketId, messages) =>
+                  setTicketMessages((prev) => ({ ...prev, [ticketId]: messages }))
+                }
+                onTicketUpdated={updateTicketState}
               />
             </div>
             <div className="ticket-actions">

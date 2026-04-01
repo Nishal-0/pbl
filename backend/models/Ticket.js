@@ -14,6 +14,7 @@ const TICKET_STATUS = [
   "Assigned",
   "Under Review",
   "Waiting for Customer",
+  "Reopened",
   "Resolved",
   "Closed",
   "Escalated",
@@ -49,6 +50,14 @@ const ticketSchema = new mongoose.Schema(
     user: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
     status: { type: String, default: "Open", enum: TICKET_STATUS },
     assignedTo: { type: mongoose.Schema.Types.ObjectId, ref: "User" }, // for support agent
+    messages: [
+      {
+        sender: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+        senderRole: { type: String, enum: ["user", "support", "admin"] },
+        message: { type: String, trim: true },
+        createdAt: { type: Date, default: Date.now },
+      },
+    ],
     resolutionNote: { type: String, default: "" },
     resolvedAt: { type: Date },
     closedAt: { type: Date },

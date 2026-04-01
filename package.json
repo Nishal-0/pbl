@@ -1,4 +1,11 @@
 {
+  "private": true,
+  "scripts": {
+    "dev:backend": "npm --prefix backend run dev",
+    "dev:frontend": "npm --prefix frontend run dev",
+    "build": "npm --prefix frontend run build",
+    "start": "npm --prefix backend start"
+  },
   "dependencies": {
     "dotenv": "^17.2.4",
     "express": "^5.2.1",

@@ -1,7 +1,9 @@
 import React, { useEffect, useState } from "react";
 import api from "../lib/api";
+import DepartmentStatusPieChart from "../components/DepartmentStatusPieChart";
+import TicketConversation from "../components/TicketConversation";
 
-const statusOptions = ["Open", "Assigned", "Under Review", "Waiting for Customer", "Resolved", "Closed", "Escalated"];
+const statusOptions = ["Open", "Assigned", "Under Review", "Waiting for Customer", "Reopened", "Resolved", "Closed", "Escalated"];
 const priorityOptions = ["low", "medium", "high"];
 const roleOptions = ["user", "support", "admin"];
 const departments = [
@@ -28,6 +30,9 @@ const AdminDashboard = ({ user, onLogout }) => {
     avgResolutionTimeHours: 0,
     ticketsPerDepartment: [],
   });
+  const [departmentStats, setDepartmentStats] = useState({});
+  const [departmentStatsLoading, setDepartmentStatsLoading] = useState(true);
+  const [selectedDepartmentAnalytics, setSelectedDepartmentAnalytics] = useState("all");
   const [departmentFilter, setDepartmentFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
   const [priorityFilter, setPriorityFilter] = useState("all");
@@ -35,6 +40,9 @@ const AdminDashboard = ({ user, onLogout }) => {
   const [departmentDrafts, setDepartmentDrafts] = useState({});
   const [userSearch, setUserSearch] = useState("");
   const [userDepartmentFilter, setUserDepartmentFilter] = useState("all");
+  const [ticketMessages, setTicketMessages] = useState({});
+  const [messageLoading, setMessageLoading] = useState({});
+  const [openThreads, setOpenThreads] = useState({});
 
   const fetchData = async () => {
     const params = {};
@@ -42,20 +50,23 @@ const AdminDashboard = ({ user, onLogout }) => {
     if (priorityFilter !== "all") params.priority = priorityFilter;
     if (departmentFilter !== "all") params.department = departmentFilter;
 
-    const [ticketsRes, usersRes, statsRes] = await Promise.all([
+    const [ticketsRes, usersRes, statsRes, departmentStatsRes] = await Promise.all([
       api.get("/api/tickets/all", { params }),
       api.get("/api/auth/users"),
       api.get("/api/tickets/stats"),
+      api.get("/api/tickets/department-stats"),
     ]);
     return {
       tickets: ticketsRes.data,
       users: usersRes.data,
       stats: statsRes.data,
+      departmentStats: departmentStatsRes.data,
     };
   };
 
   useEffect(() => {
     let cancelled = false;
+    setDepartmentStatsLoading(true);
 
     fetchData()
       .then((data) => {
@@ -63,9 +74,12 @@ const AdminDashboard = ({ user, onLogout }) => {
         setTickets(data.tickets);
         setUsers(data.users);
         setStats(data.stats);
+        setDepartmentStats(data.departmentStats);
+        setDepartmentStatsLoading(false);
       })
       .catch((err) => {
         console.error(err);
+        setDepartmentStatsLoading(false);
         alert("Failed to load admin data");
       });
 
@@ -74,14 +88,36 @@ const AdminDashboard = ({ user, onLogout }) => {
     };
   }, [statusFilter, priorityFilter, departmentFilter]);
 
+  const departmentAnalyticsOptions = Object.keys(departmentStats);
+
+  useEffect(() => {
+    if (departmentAnalyticsOptions.length === 0) {
+      if (selectedDepartmentAnalytics !== "all") {
+        setSelectedDepartmentAnalytics("all");
+      }
+      return;
+    }
+
+    if (
+      selectedDepartmentAnalytics !== "all" &&
+      !departmentAnalyticsOptions.includes(selectedDepartmentAnalytics)
+    ) {
+      setSelectedDepartmentAnalytics(departmentAnalyticsOptions[0]);
+    }
+  }, [departmentAnalyticsOptions, selectedDepartmentAnalytics]);
+
   const loadData = async () => {
     try {
+      setDepartmentStatsLoading(true);
       const data = await fetchData();
       setTickets(data.tickets);
       setUsers(data.users);
       setStats(data.stats);
+      setDepartmentStats(data.departmentStats);
+      setDepartmentStatsLoading(false);
     } catch (err) {
       console.error(err);
+      setDepartmentStatsLoading(false);
       alert("Failed to load admin data");
     }
   };
@@ -136,6 +172,33 @@ const AdminDashboard = ({ user, onLogout }) => {
     }
   };
 
+  const toggleThread = async (ticketId) => {
+    const nextOpen = !openThreads[ticketId];
+    setOpenThreads((prev) => ({ ...prev, [ticketId]: nextOpen }));
+
+    if (!nextOpen || ticketMessages[ticketId] !== undefined) {
+      return;
+    }
+
+    setMessageLoading((prev) => ({ ...prev, [ticketId]: true }));
+    try {
+      const response = await api.get(`/api/tickets/${ticketId}/messages`);
+      setTicketMessages((prev) => ({ ...prev, [ticketId]: response.data }));
+    } catch (err) {
+      console.error(err);
+      alert(err.response?.data?.message || "Failed to load messages");
+      setOpenThreads((prev) => ({ ...prev, [ticketId]: false }));
+    } finally {
+      setMessageLoading((prev) => ({ ...prev, [ticketId]: false }));
+    }
+  };
+
+  const updateTicketState = (updatedTicket) => {
+    setTickets((prev) =>
+      prev.map((ticket) => (ticket._id === updatedTicket._id ? updatedTicket : ticket))
+    );
+  };
+
   const updateUserRole = async (userId, role) => {
     try {
       const existing = users.find((u) => u._id === userId);
@@ -153,7 +216,22 @@ const AdminDashboard = ({ user, onLogout }) => {
       }
 
       await api.patch(`/api/auth/users/${userId}/role`, payload);
-      await loadData();
+      setUsers((prev) =>
+        prev.map((member) =>
+          member._id === userId
+            ? {
+                ...member,
+                role: nextRole,
+                department: ["support", "admin"].includes(nextRole) ? nextDepartment : undefined,
+              }
+            : member
+        )
+      );
+      setRoleDrafts((prev) => ({ ...prev, [userId]: nextRole }));
+      setDepartmentDrafts((prev) => ({
+        ...prev,
+        [userId]: ["support", "admin"].includes(nextRole) ? nextDepartment : "",
+      }));
     } catch (err) {
       console.error(err);
       alert(err.response?.data?.error || err.response?.data?.message || "Failed to update role");
@@ -209,7 +287,21 @@ const AdminDashboard = ({ user, onLogout }) => {
       </div>
 
       <div className="card">
-        <h2>Department Analytics</h2>
+        <div className="card-head">
+          <h2>Department Analytics</h2>
+          <div className="inline-grid analytics-toolbar">
+            <select
+              value={selectedDepartmentAnalytics}
+              onChange={(e) => setSelectedDepartmentAnalytics(e.target.value)}
+              disabled={departmentStatsLoading || departmentAnalyticsOptions.length === 0}
+            >
+              <option value="all">all departments</option>
+              {departmentAnalyticsOptions.map((department) => (
+                <option key={department} value={department}>{department}</option>
+              ))}
+            </select>
+          </div>
+        </div>
         {stats.ticketsPerDepartment?.length === 0 && <p>No analytics yet.</p>}
         {stats.ticketsPerDepartment?.length > 0 && (
           <div className="analytics-list">
@@ -221,6 +313,26 @@ const AdminDashboard = ({ user, onLogout }) => {
             ))}
           </div>
         )}
+        <div className="department-chart-section">
+          {departmentStatsLoading && <p>Loading department charts...</p>}
+          {!departmentStatsLoading && departmentAnalyticsOptions.length === 0 && (
+            <p>No department chart data available.</p>
+          )}
+          {!departmentStatsLoading &&
+            departmentAnalyticsOptions
+              .filter((department) =>
+                selectedDepartmentAnalytics === "all"
+                  ? true
+                  : department === selectedDepartmentAnalytics
+              )
+              .map((department) => (
+                <DepartmentStatusPieChart
+                  key={department}
+                  department={department}
+                  stats={departmentStats[department]}
+                />
+              ))}
+        </div>
       </div>
 
       <div className="card">
@@ -266,6 +378,19 @@ const AdminDashboard = ({ user, onLogout }) => {
               </p>
               <p><small>SLA: {ticket.slaDeadline ? new Date(ticket.slaDeadline).toLocaleString() : "N/A"}</small></p>
               {ticket.resolutionNote && <p><small>Note: {ticket.resolutionNote}</small></p>}
+              <TicketConversation
+                ticket={ticket}
+                canReply={Boolean(ticket.assignedTo?._id === user?._id)}
+                placeholder="Reply to customer"
+                messages={ticketMessages[ticket._id]}
+                loading={messageLoading[ticket._id]}
+                isOpen={Boolean(openThreads[ticket._id])}
+                onToggle={toggleThread}
+                onMessagesLoaded={(ticketId, messages) =>
+                  setTicketMessages((prev) => ({ ...prev, [ticketId]: messages }))
+                }
+                onTicketUpdated={updateTicketState}
+              />
               {ticket.feedback?.rating && (
                 <p>
                   <small>
@@ -340,16 +465,23 @@ const AdminDashboard = ({ user, onLogout }) => {
           </div>
         </div>
         {filteredUsers.length === 0 && <p>No users found.</p>}
-        {filteredUsers.map((item) => (
-          <div key={item._id} className="ticket-row">
-            <div>
-              <strong>{item.name}</strong>
-              <p>{item.email}</p>
-              <small>{item.department || "No department"}</small>
-            </div>
-            <div className="ticket-actions">
-              <select
-                value={roleDrafts[item._id] ?? item.role}
+        {filteredUsers.map((item) => {
+          const draftRole = roleDrafts[item._id] ?? item.role;
+          const visibleDepartment =
+            draftRole === "user"
+              ? ""
+              : departmentDrafts[item._id] ?? item.department ?? "";
+
+          return (
+            <div key={item._id} className="ticket-row">
+              <div>
+                <strong>{item.name}</strong>
+                <p>{item.email}</p>
+                <small>{visibleDepartment || "No department"}</small>
+              </div>
+              <div className="ticket-actions">
+                <select
+                  value={draftRole}
                 onChange={(e) => {
                   const nextRole = e.target.value;
                   setRoleDrafts((prev) => ({ ...prev, [item._id]: nextRole }));
@@ -357,31 +489,32 @@ const AdminDashboard = ({ user, onLogout }) => {
                     setDepartmentDrafts((prev) => ({ ...prev, [item._id]: "" }));
                   }
                 }}
-              >
-                {roleOptions.map((role) => (
-                  <option key={role} value={role}>
-                    {role}
-                  </option>
-                ))}
-              </select>
-              <select
-                value={departmentDrafts[item._id] ?? item.department ?? ""}
-                onChange={(e) =>
-                  setDepartmentDrafts((prev) => ({ ...prev, [item._id]: e.target.value }))
-                }
-                disabled={(roleDrafts[item._id] ?? item.role) === "user"}
-              >
-                <option value="">No department</option>
-                {departments.map((dept) => (
-                  <option key={dept} value={dept}>{dept}</option>
-                ))}
-              </select>
-              <button onClick={() => updateUserRole(item._id, roleDrafts[item._id] ?? item.role)}>
-                Save
-              </button>
+                >
+                  {roleOptions.map((role) => (
+                    <option key={role} value={role}>
+                      {role}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  value={departmentDrafts[item._id] ?? item.department ?? ""}
+                  onChange={(e) =>
+                    setDepartmentDrafts((prev) => ({ ...prev, [item._id]: e.target.value }))
+                  }
+                  disabled={draftRole === "user"}
+                >
+                  <option value="">No department</option>
+                  {departments.map((dept) => (
+                    <option key={dept} value={dept}>{dept}</option>
+                  ))}
+                </select>
+                <button onClick={() => updateUserRole(item._id, draftRole)}>
+                  Save
+                </button>
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );

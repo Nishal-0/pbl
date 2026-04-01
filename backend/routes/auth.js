@@ -9,6 +9,13 @@ const { DEPARTMENTS } = require("../lib/ticketConfig");
 const router = express.Router();
 const TOKEN_COOKIE_NAME = "token";
 const TOKEN_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+const isProduction = process.env.NODE_ENV === "production";
+const cookieOptions = {
+  httpOnly: true,
+  sameSite: isProduction ? "none" : "lax",
+  secure: isProduction,
+  maxAge: TOKEN_MAX_AGE_MS,
+};
 
 const verifyGoogleCredential = async (credential) => {
   const url = `https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(credential)}`;
@@ -80,12 +87,7 @@ router.post("/google-login", async (req, res) => {
       }
     );
 
-    res.cookie(TOKEN_COOKIE_NAME, token, {
-      httpOnly: true,
-      sameSite: "lax",
-      secure: process.env.NODE_ENV === "production",
-      maxAge: TOKEN_MAX_AGE_MS,
-    });
+    res.cookie(TOKEN_COOKIE_NAME, token, cookieOptions);
 
     res.json({ user });
   } catch (err) {
@@ -97,8 +99,8 @@ router.post("/google-login", async (req, res) => {
 router.post("/logout", (_req, res) => {
   res.clearCookie(TOKEN_COOKIE_NAME, {
     httpOnly: true,
-    sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
+    sameSite: cookieOptions.sameSite,
+    secure: cookieOptions.secure,
   });
   res.status(204).send();
 });

@@ -12,6 +12,7 @@ const STATUS = [
   "Assigned",
   "Under Review",
   "Waiting for Customer",
+  "Reopened",
   "Resolved",
   "Closed",
   "Escalated",
@@ -47,8 +48,9 @@ const STATUS_TRANSITIONS = {
   Assigned: ["Open", "Under Review", "Waiting for Customer", "Resolved", "Closed", "Escalated"],
   "Under Review": ["Assigned","Waiting for Customer", "Resolved", "Escalated","Closed"],
   "Waiting for Customer": ["Under Review", "Resolved", "Escalated", "Closed"],
-  Resolved: ["Closed", "Under Review"],
-  Closed: ["Open","Waiting for Customer", "Resolved", "Escalated"],
+  Reopened: ["Assigned", "Under Review"],
+  Resolved: ["Closed", "Under Review", "Reopened"],
+  Closed: ["Open","Waiting for Customer", "Resolved", "Escalated", "Reopened"],
   Escalated: ["Open", "Assigned", "Under Review", "Resolved", "Closed"],
 };
 
