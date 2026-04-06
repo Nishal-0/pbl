@@ -57,8 +57,6 @@ if (
   process.exit(1);
 }
 
-connectDB();
-
 app.use(
   cors({
     origin(origin, callback) {
@@ -89,7 +87,19 @@ app.use(notFound);
 app.use(errorHandler);
 
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+
+const startServer = async () => {
+  await connectDB();
+  app.listen(PORT, () => {
+    console.log(`Server running on port ${PORT}`);
+  });
+};
+
+startServer().catch((error) => {
+  console.error("Server startup failed:", error.message);
+  process.exit(1);
 });
 
+app.get("/", (req, res) => {
+  res.send("API is running 🚀");
+});
