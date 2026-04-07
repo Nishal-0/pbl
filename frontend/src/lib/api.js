@@ -11,6 +11,12 @@ const api = axios.create({
   withCredentials: true,
 });
 
+export const googleLogin = ({ credential, selectedRole }) =>
+  api.post("/api/auth/google-login", {
+    credential,
+    selectedRole,
+  });
+
 export const clearAuth = () => {
   localStorage.removeItem("token");
   localStorage.removeItem("user");

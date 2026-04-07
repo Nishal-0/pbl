@@ -16,6 +16,72 @@ const cookieOptions = {
   secure: isProduction,
   maxAge: TOKEN_MAX_AGE_MS,
 };
+const SELF_SERVICE_ROLES = new Set(["user", "support", "admin"]);
+const DEFAULT_ADMIN_DEPARTMENT = DEPARTMENTS.includes(process.env.ADMIN_DEFAULT_DEPARTMENT)
+  ? process.env.ADMIN_DEFAULT_DEPARTMENT
+  : "Technical Support";
+
+const normalizeSelectedRole = (value) => {
+  if (typeof value !== "string") return "user";
+
+  const normalized = value.trim().toLowerCase();
+  return SELF_SERVICE_ROLES.has(normalized) ? normalized : "user";
+};
+
+const getEmailDomain = (email) => {
+  if (typeof email !== "string") return "";
+  return email.split("@")[1]?.trim().toLowerCase() || "";
+};
+
+const getAllowedSupportDomains = () =>
+  (process.env.SUPPORT_ALLOWED_EMAIL_DOMAINS || "")
+    .split(",")
+    .map((item) => item.trim().toLowerCase())
+    .filter(Boolean);
+
+const getAdminEmails = () =>
+  (process.env.ADMIN_EMAILS || "thillainishal29@gmail.com")
+    .split(",")
+    .map((item) => item.trim().toLowerCase())
+    .filter(Boolean);
+
+const isConfiguredAdminEmail = (email) =>
+  typeof email === "string" && getAdminEmails().includes(email.trim().toLowerCase());
+
+const resolveRoleAndDepartment = (selectedRole, email, currentDepartment) => {
+  if (isConfiguredAdminEmail(email)) {
+    return {
+      role: "admin",
+      department:
+        typeof currentDepartment === "string" && DEPARTMENTS.includes(currentDepartment)
+          ? currentDepartment
+          : DEFAULT_ADMIN_DEPARTMENT,
+    };
+  }
+
+  const resolvedRole = resolveSelfServiceRole(selectedRole, email);
+  return {
+    role: resolvedRole,
+    department: resolvedRole === "support" ? currentDepartment : undefined,
+  };
+};
+
+const resolveSelfServiceRole = (selectedRole, email) => {
+  if (selectedRole === "admin") {
+    return "user";
+  }
+
+  if (selectedRole === "support") {
+    const allowedDomains = getAllowedSupportDomains();
+    if (allowedDomains.length === 0) {
+      return "support";
+    }
+
+    return allowedDomains.includes(getEmailDomain(email)) ? "support" : "user";
+  }
+
+  return "user";
+};
 
 const verifyGoogleCredential = async (credential) => {
   const url = `https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(credential)}`;
@@ -41,7 +107,7 @@ const verifyGoogleCredential = async (credential) => {
 };
 
 router.post("/google-login", async (req, res) => {
-  const { credential } = req.body;
+  const { credential, selectedRole } = req.body;
 
   try {
     if (!credential) {
@@ -53,18 +119,27 @@ router.post("/google-login", async (req, res) => {
       return res.status(401).json({ message: "Invalid Google token" });
     }
 
+    const requestedRole = normalizeSelectedRole(selectedRole);
+
     let user = await User.findOne({
       $or: [{ googleId: payload.sub }, { email: payload.email }],
     });
 
     if (!user) {
+      const resolvedAccess = resolveRoleAndDepartment(requestedRole, payload.email);
       user = await User.create({
         name: payload.name,
         email: payload.email,
         googleId: payload.sub,
-        role: "user",
+        role: resolvedAccess.role,
+        department: resolvedAccess.department,
       });
     } else {
+      const resolvedAccess = resolveRoleAndDepartment(
+        requestedRole,
+        payload.email,
+        user.department
+      );
       // Avoid blocking login on legacy profile validation rules.
       await User.updateOne(
         { _id: user._id },
@@ -73,6 +148,8 @@ router.post("/google-login", async (req, res) => {
             name: payload.name,
             email: payload.email,
             googleId: payload.sub,
+            role: resolvedAccess.role,
+            department: resolvedAccess.department,
           },
         }
       );

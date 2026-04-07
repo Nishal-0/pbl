@@ -1,7 +1,7 @@
-import React from "react";
+import React, { useState } from "react";
 import { GoogleLogin } from "@react-oauth/google";
 import { useNavigate } from "react-router-dom";
-import api from "../lib/api";
+import { googleLogin } from "../lib/api";
 
 const roleHomePath = {
   admin: "/admin",
@@ -12,11 +12,13 @@ const roleHomePath = {
 
 const Login = ({ setUser }) => {
   const navigate = useNavigate();
+  const [selectedRole, setSelectedRole] = useState("user");
 
   const handleLogin = async (credentialResponse) => {
     try {
-      const res = await api.post("/api/auth/google-login", {
+      const res = await googleLogin({
         credential: credentialResponse.credential,
+        selectedRole,
       });
 
       localStorage.setItem("user", JSON.stringify(res.data.user));
@@ -49,6 +51,27 @@ const Login = ({ setUser }) => {
       <section className="card login-auth">
         <h2>Sign in</h2>
         <p>Continue with your Google account to access the portal securely.</p>
+        <div className="login-role-picker">
+          <span className="login-role-label">Select your access request</span>
+          <div className="login-role-options" role="radiogroup" aria-label="Select role">
+            {["user", "support", "admin"].map((role) => (
+              <label key={role} className="login-role-option">
+                <input
+                  type="radio"
+                  name="selectedRole"
+                  value={role}
+                  checked={selectedRole === role}
+                  onChange={(e) => setSelectedRole(e.target.value)}
+                />
+                <span>{role}</span>
+              </label>
+            ))}
+          </div>
+          <small>
+            New accounts keep the selected role when allowed. Admin access still requires manual
+            assignment.
+          </small>
+        </div>
         <div className="login-google-wrap">
           <GoogleLogin
             onSuccess={handleLogin}
