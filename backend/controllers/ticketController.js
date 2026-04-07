@@ -48,12 +48,14 @@ const ensureEscalations = async (baseQuery = {}) => {
   );
 };
 
+const isAdminUser = (req) => req.user.role === "admin";
+
 const canAccessTicket = (req, ticket) => {
   if (req.user.role === "user") {
     return String(ticket.user) === req.user.id;
   }
 
-  if (req.user.role === "admin" && req.legacyAdminScope) {
+  if (isAdminUser(req)) {
     return true;
   }
 
@@ -88,7 +90,7 @@ const sortMessages = (messages = []) =>
   [...messages].sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
 
 const getAdminScopedTicketQuery = (req) => {
-  if (req.user.role === "admin" && req.legacyAdminScope) {
+  if (isAdminUser(req)) {
     return {};
   }
 
@@ -99,7 +101,7 @@ const getMyTickets = async (req, res) => {
   try {
     const query = req.user.role === "user"
       ? { user: req.user.id }
-      : req.user.role === "admin" && req.legacyAdminScope
+      : isAdminUser(req)
         ? {}
       : req.user.role === "support" && req.legacySupportScope
         ? { assignedTo: req.user.id }
@@ -125,8 +127,8 @@ const getAllTickets = async (req, res) => {
 
     if (req.user.role === "user") {
       query.user = req.user.id;
-    } else if (req.user.role === "admin" && req.legacyAdminScope) {
-      // Legacy admin can view globally unless a filter is explicitly applied below.
+    } else if (isAdminUser(req)) {
+      // Admins can view globally unless a filter is explicitly applied below.
     } else if (req.user.role === "support" && req.legacySupportScope) {
       query.assignedTo = req.user.id;
     } else {
@@ -142,7 +144,7 @@ const getAllTickets = async (req, res) => {
     }
 
     if (req.query.department && DEPARTMENTS.includes(req.query.department)) {
-      if (req.user.role === "user" || (req.user.role === "admin" && req.legacyAdminScope)) {
+      if (req.user.role === "user" || isAdminUser(req)) {
         query.department = req.query.department;
       }
     }
@@ -165,7 +167,7 @@ const getTicketStats = async (req, res) => {
   try {
     const match = req.user.role === "user"
       ? { user: toObjectId(req.user.id) }
-      : req.user.role === "admin" && req.legacyAdminScope
+      : isAdminUser(req)
         ? {}
       : req.user.role === "support" && req.legacySupportScope
         ? { assignedTo: toObjectId(req.user.id) }
@@ -174,7 +176,7 @@ const getTicketStats = async (req, res) => {
     await ensureEscalations(
       req.user.role === "user"
         ? { user: req.user.id }
-        : req.user.role === "admin" && req.legacyAdminScope
+        : isAdminUser(req)
           ? {}
         : req.user.role === "support" && req.legacySupportScope
           ? { assignedTo: req.user.id }
@@ -209,7 +211,7 @@ const getTicketStats = async (req, res) => {
     stats.slaBreaches = await Ticket.countDocuments({
       ...(req.user.role === "user"
         ? { user: req.user.id }
-        : req.user.role === "admin" && req.legacyAdminScope
+        : isAdminUser(req)
           ? {}
         : req.user.role === "support" && req.legacySupportScope
           ? { assignedTo: req.user.id }
@@ -503,7 +505,7 @@ const getDepartmentStats = async (req, res) => {
     ]);
 
     const visibleDepartments =
-      req.user.role === "admin" && req.legacyAdminScope
+      isAdminUser(req)
         ? DEPARTMENTS
         : [req.departmentScope].filter(Boolean);
 
@@ -700,9 +702,6 @@ const deleteTicket = async (req, res) => {
         return res.status(403).json({ message: "Only Open tickets can be deleted by users" });
       }
     } else {
-      if (!req.legacyAdminScope && ticket.department !== req.departmentScope) {
-        return res.status(403).json({ message: "Forbidden" });
-      }
       if (req.user.role !== "admin") {
         return res.status(403).json({ message: "Only admin can delete tickets" });
       }
